@@ -793,7 +793,15 @@
             android:screenOrientation="portrait" />
         <activity
             android:name=".activity.render.RenderTestActivity"
-            android:screenOrientation="portrait"/>
+            android:label="@string/activity_heatmaplayer"
+            android:screenOrientation="portrait">
+            <meta-data
+                    android:name="@string/category"
+                    android:value="@string/category_basic" />
+            <meta-data
+                    android:name="android.support.PARENT_ACTIVITY"
+                    android:value="com.mapbox.mapboxsdk.testapp.activity.FeatureOverviewActivity" />
+        </activity>
         <!-- Configuration Settings -->
         <meta-data
             android:name="com.mapbox.TestEventsServer"

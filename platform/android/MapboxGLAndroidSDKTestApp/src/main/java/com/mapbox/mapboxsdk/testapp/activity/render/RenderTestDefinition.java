@@ -1,35 +1,67 @@
 package com.mapbox.mapboxsdk.testapp.activity.render;
 
-import com.mapbox.mapboxsdk.camera.CameraPosition;
-import com.mapbox.mapboxsdk.geometry.LatLng;
+import com.google.gson.Gson;
 import com.mapbox.mapboxsdk.snapshotter.MapSnapshotter;
 
 public class RenderTestDefinition {
 
-  private String name;
-  private int width;
-  private int height;
-  private double[] center;
-  private double zoom;
-  private double tilt;
-  private double bearing;
-  private String styleUrl;
+  private final static int DEFAULT_WIDTH = 512;
+  private final static int DEFAULT_HEIGHT = 512;
 
-  public String getName() {
-    return name.replaceAll(" ", "_").toLowerCase();
+  private String category; // eg. background-color
+  private String name; // eg. colorSpace-hcl
+  private String styleJson;
+  private RenderTestStyleDefinition definition;
+
+  RenderTestDefinition(String category, String name, String styleJson) {
+    this.category = category;
+    this.name = name;
+    this.styleJson = styleJson;
+    definition = new Gson().fromJson(styleJson, RenderTestStyleDefinition.class);
   }
 
+  public String getName() {
+    return name;
+  }
+
+  public String getCategory() {
+    return category;
+  }
+
+  public int getWidth() {
+    RenderTestStyleDefinition.Test test = definition.getMetadata().getTest();
+    if (test != null) {
+      Integer testWidth = test.getWidth();
+      if(testWidth!=null && testWidth > 0){
+        return testWidth;
+      }
+    }
+    return DEFAULT_WIDTH;
+  }
+
+  public int getHeight() {
+    RenderTestStyleDefinition.Test test = definition.getMetadata().getTest();
+    if (test != null) {
+      Integer testHeight = test.getHeight();
+      if(testHeight!=null && testHeight > 0){
+        return testHeight;
+      }
+    }
+    return DEFAULT_HEIGHT;
+  }
   public MapSnapshotter.Options toOptions() {
     return new MapSnapshotter
-      .Options(width, height)
-      .withStyle(styleUrl)
-      .withCameraPosition(
-        new CameraPosition.Builder()
-          .target(new LatLng(center[0], center[1]))
-          .zoom(zoom)
-          .tilt(tilt)
-          .bearing(bearing)
-          .build()
-      );
+      .Options(getWidth(), getHeight())
+      .withStyleJson(styleJson)
+      .withLogo(false);
+  }
+
+  @Override
+  public String toString() {
+    return "RenderTestDefinition{" +
+      "category='" + category + '\'' +
+      ", name='" + name + '\'' +
+      ", styleJson='" + styleJson + '\'' +
+      '}';
   }
 }

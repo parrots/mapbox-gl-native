@@ -1,5 +1,6 @@
 package com.mapbox.mapboxsdk.testapp.activity.render;
 
+import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.os.Environment;
@@ -8,16 +9,16 @@ import android.support.v7.app.AppCompatActivity;
 import android.view.Gravity;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
-
-import com.google.gson.Gson;
-import com.mapbox.mapboxsdk.maps.MapboxMap;
-import com.mapbox.mapboxsdk.snapshotter.MapSnapshot;
 import com.mapbox.mapboxsdk.snapshotter.MapSnapshotter;
+import okio.BufferedSource;
+import okio.Okio;
+import timber.log.Timber;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -25,9 +26,10 @@ import java.util.Map;
 
 public class RenderTestActivity extends AppCompatActivity {
 
+  private static final String RENDER_TEST_BASE_PATH = "integration/render-tests";
+
   private final Map<RenderTestDefinition, Bitmap> renderResultMap = new HashMap<>();
   private final List<MapSnapshotter> mapSnapshotterList = new ArrayList<>();
-
   private ImageView imageView;
   private OnSnapshotReadyListener onSnapshotReadyListener;
 
@@ -37,37 +39,66 @@ public class RenderTestActivity extends AppCompatActivity {
     setContentView(imageView = new ImageView(RenderTestActivity.this));
     imageView.setLayoutParams(new FrameLayout.LayoutParams(512, 512, Gravity.CENTER));
     try {
-      RenderTestDefinition[] renderTestDefinitions = createRenderTestDefinition();
+      List<RenderTestDefinition> renderTestDefinitions = createRenderTestDefinition();
       renderTests(renderTestDefinitions);
     } catch (IOException exception) {
+      Timber.e(exception);
       throw new RuntimeException(exception);
     }
   }
 
-  private RenderTestDefinition[] createRenderTestDefinition() throws IOException {
-    return new Gson().fromJson(
-      new InputStreamReader(getAssets().open("render-test.json")),
-      RenderTestDefinition[].class
-    );
+  private List<RenderTestDefinition> createRenderTestDefinition() throws IOException {
+    List<RenderTestDefinition> definitions = new ArrayList<>();
+    AssetManager assetManager = getAssets();
+
+    String[] categories = assetManager.list(RENDER_TEST_BASE_PATH);
+    for (String category : categories) {
+      String[] tests = assetManager.list(String.format("%s/%s", RENDER_TEST_BASE_PATH, category));
+      for (String test : tests) {
+        String styleJson = null;
+        try {
+          styleJson = loadStyleJson(assetManager, category, test);
+        } catch (IOException exception) {
+          Timber.e(exception);
+        }
+        definitions.add(new RenderTestDefinition(category, test, styleJson));
+
+        // TODO REMOVE
+        if (definitions.size() == 20) {
+          return definitions;
+        }
+      }
+    }
+
+    for (RenderTestDefinition definition : definitions) {
+      Timber.e("definitiion %s", definition.toString());
+    }
+
+    return definitions;
   }
 
-  private void renderTests(RenderTestDefinition[] renderTestDefinitions) {
+  private static String loadStyleJson(AssetManager assets, String category, String test) throws IOException {
+    InputStream input = assets.open(String.format("%s/%s/%s/style.json", RENDER_TEST_BASE_PATH, category, test));
+    BufferedSource source = Okio.buffer(Okio.source(input));
+    return source.readByteString().string(Charset.forName("utf-8"));
+  }
+
+  private void renderTests(List<RenderTestDefinition> renderTestDefinitions) {
     for (RenderTestDefinition renderTestDefinition : renderTestDefinitions) {
-      renderTest(renderTestDefinition, renderTestDefinitions.length);
+      renderTest(renderTestDefinition, renderTestDefinitions.size());
     }
   }
 
   private void renderTest(final RenderTestDefinition renderTestDefinition, final int testSize) {
-    MapSnapshotter mapSnapshotter = new MapSnapshotter(this, renderTestDefinition.toOptions());
+    MapSnapshotter mapSnapshotter = new RenderTestSnapshotter(this, renderTestDefinition.toOptions());
     mapSnapshotterList.add(mapSnapshotter);
-    mapSnapshotter.start(new MapSnapshotter.SnapshotReadyCallback() {
-      @Override
-      public void onSnapshotReady(MapSnapshot result) {
-        Bitmap snapshot = result.getBitmap();
-        imageView.setImageBitmap(snapshot);
-        renderResultMap.put(renderTestDefinition, snapshot);
-        if (renderResultMap.size() == testSize) {
-          writeResultsToDisk();
+    mapSnapshotter.start(result -> {
+      Bitmap snapshot = result.getBitmap();
+      imageView.setImageBitmap(snapshot);
+      renderResultMap.put(renderTestDefinition, snapshot);
+      if (renderResultMap.size() == testSize) {
+        writeResultsToDisk();
+        if (onSnapshotReadyListener != null) {
           onSnapshotReadyListener.onSnapshotReady();
         }
       }
@@ -81,18 +112,30 @@ public class RenderTestActivity extends AppCompatActivity {
         String basePath = testResultDir.getAbsolutePath();
 
         for (Map.Entry<RenderTestDefinition, Bitmap> testResult : renderResultMap.entrySet()) {
+          RenderTestDefinition definition = testResult.getKey();
+          String categoryName = definition.getCategory();
+          String categoryPath = String.format("%s/%s", basePath, categoryName);
+          createCategoryDirectory(categoryPath);
           String testName = testResult.getKey().getName();
-          String testDir = createTestDirectory(basePath, testName);
+          String testDir = createTestDirectory(categoryPath, testName);
           writeTestResultToDisk(testDir, testResult.getValue());
         }
       } catch (final Exception exception) {
-        imageView.post(new Runnable() {
-          @Override
-          public void run() {
-            throw new RuntimeException(exception);
-          }
+        imageView.post(() -> {
+          throw new RuntimeException(exception);
         });
       }
+    }
+  }
+
+  private void createCategoryDirectory(String catPath) {
+    File testResultDir = new File(catPath);
+    if (testResultDir.exists()) {
+      return;
+    }
+
+    if (!testResultDir.mkdirs()) {
+      throw new RuntimeException("can't create root test directory");
     }
   }
 

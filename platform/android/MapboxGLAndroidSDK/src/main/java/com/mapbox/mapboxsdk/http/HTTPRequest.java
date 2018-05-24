@@ -2,26 +2,16 @@ package com.mapbox.mapboxsdk.http;
 
 import android.content.Context;
 import android.content.pm.PackageInfo;
+import android.content.res.AssetManager;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.support.annotation.NonNull;
 import android.text.TextUtils;
 import android.util.Log;
-
 import com.mapbox.android.telemetry.TelemetryUtils;
 import com.mapbox.mapboxsdk.BuildConfig;
 import com.mapbox.mapboxsdk.Mapbox;
 import com.mapbox.mapboxsdk.constants.MapboxConstants;
-
-import java.io.IOException;
-import java.io.InterruptedIOException;
-import java.net.NoRouteToHostException;
-import java.net.ProtocolException;
-import java.net.SocketException;
-import java.net.UnknownHostException;
-import java.util.concurrent.locks.ReentrantLock;
-
-import javax.net.ssl.SSLException;
-
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.Dispatcher;
@@ -30,7 +20,20 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import okio.BufferedSource;
+import okio.Okio;
 import timber.log.Timber;
+
+import javax.net.ssl.SSLException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.net.NoRouteToHostException;
+import java.net.ProtocolException;
+import java.net.SocketException;
+import java.net.UnknownHostException;
+import java.nio.charset.Charset;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static android.util.Log.DEBUG;
 import static android.util.Log.ERROR;
@@ -56,6 +59,32 @@ class HTTPRequest implements Callback {
 
   private HTTPRequest(long nativePtr, String resourceUrl, String etag, String modified) {
     this.nativePtr = nativePtr;
+
+    if (resourceUrl.startsWith("local://")) {
+      final String localResouce = resourceUrl;
+      new AsyncTask<Void, Void, byte[]>() {
+
+        @Override
+        protected byte[] doInBackground(Void... voids) {
+          try {
+            return loadFile(Mapbox.getApplicationContext().getAssets(), "integration/"+localResouce.substring(8));
+          }catch (IOException exception){
+            Timber.e(exception);
+          }
+          return null;
+        }
+
+        @Override
+        protected void onPostExecute(byte[] bytes) {
+          super.onPostExecute(bytes);
+          if(bytes!=null) {
+            nativeOnResponse(200, "", "", "", "", "", "", bytes);
+          }
+        }
+      }.execute();
+      return;
+    }
+
 
     try {
       HttpUrl httpUrl = HttpUrl.parse(resourceUrl);
@@ -94,6 +123,15 @@ class HTTPRequest implements Callback {
     } catch (Exception exception) {
       handleFailure(call, exception);
     }
+  }
+
+  private static byte[] loadFile(AssetManager assets, String path) throws IOException {
+    InputStream input = assets.open(path);
+    int size = input.available();
+    byte[] buffer = new byte[size];
+    input.read(buffer);
+    input.close();
+    return buffer;
   }
 
   public void cancel() {
